@@ -4,9 +4,7 @@ import {
     TelegramClient
 } from "teleproto";
 
-import {
-    StringSession
-} from "teleproto/sessions";
+import { StringSession } from "teleproto/sessions/index.js";
 
 import {
     createInterface
