@@ -1,7 +1,6 @@
 import "dotenv/config";
 
 import express from "express";
-import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -14,26 +13,59 @@ import { StringSession } from "teleproto/sessions/index.js";
 // CONFIG
 // ============================================================
 
-const PORT = Number(process.env.PORT || 10000);
+const PORT = Number(
+    process.env.PORT || 10000
+);
 
-const API_ID = Number(process.env.API_ID || 0);
-const API_HASH = process.env.API_HASH || "";
+
+// ============================================================
+// TELEGRAM API CREDENTIALS
+//
+// Supports BOTH naming styles:
+//
+// TELEGRAM_API_ID / TELEGRAM_API_HASH
+// API_ID / API_HASH
+//
+// TELEGRAM_* takes priority.
+// ============================================================
+
+const API_ID = Number(
+    process.env.TELEGRAM_API_ID ||
+    process.env.API_ID ||
+    0
+);
+
+const API_HASH =
+    process.env.TELEGRAM_API_HASH ||
+    process.env.API_HASH ||
+    "";
+
+
+// ============================================================
+// TELEGRAM SESSION
+// ============================================================
 
 const TELEGRAM_SESSION =
     process.env.TELEGRAM_SESSION || "";
 
-const BOT_TOKEN =
-    process.env.BOT_TOKEN || "";
 
-const BRIDGE_SECRET =
-    process.env.BRIDGE_SECRET || "";
+// ============================================================
+// GOFILE
+// ============================================================
 
 const GOFILE_UPLOAD_URL =
     process.env.GOFILE_UPLOAD_URL ||
     "https://upload.gofile.io/uploadfile";
 
+
+// ============================================================
+// TEMP DIRECTORY
+// ============================================================
+
 const TEMP_DIR =
-    path.resolve(process.env.TEMP_DIR || "./tmp");
+    path.resolve(
+        process.env.TEMP_DIR || "./tmp"
+    );
 
 
 // ============================================================
@@ -41,30 +73,41 @@ const TEMP_DIR =
 // ============================================================
 
 if (!API_ID) {
-    console.error("❌ API_ID is missing");
+
+    console.error(
+        "❌ Telegram API ID is missing."
+    );
+
+    console.error(
+        "Set either TELEGRAM_API_ID or API_ID."
+    );
+
     process.exit(1);
 }
+
 
 if (!API_HASH) {
-    console.error("❌ API_HASH is missing");
+
+    console.error(
+        "❌ Telegram API HASH is missing."
+    );
+
+    console.error(
+        "Set either TELEGRAM_API_HASH or API_HASH."
+    );
+
     process.exit(1);
 }
+
 
 if (!TELEGRAM_SESSION) {
+
     console.error(
-        "❌ TELEGRAM_SESSION is missing"
+        "❌ TELEGRAM_SESSION is missing."
     );
 
     console.error(
-        "Run login.js first."
-    );
-
-    process.exit(1);
-}
-
-if (!BRIDGE_SECRET) {
-    console.error(
-        "❌ BRIDGE_SECRET is missing"
+        "Run login.js first and save the generated session."
     );
 
     process.exit(1);
@@ -105,6 +148,7 @@ const session =
         TELEGRAM_SESSION
     );
 
+
 const client =
     new TelegramClient(
         session,
@@ -127,21 +171,21 @@ async function connectTelegram() {
     );
 
     /*
-     * The saved session means we don't normally
-     * need an interactive login here.
-     *
-     * We intentionally don't put the phone number
-     * or login code into the server.
+     * The saved session means the server does not
+     * normally need an interactive login.
      */
 
     await client.connect();
 
+
     const me =
         await client.getMe();
+
 
     console.log(
         "[TG] Connected."
     );
+
 
     console.log(
         `[TG] Account: ${
@@ -150,52 +194,6 @@ async function connectTelegram() {
                 : me?.firstName || "unknown"
         }`
     );
-}
-
-
-// ============================================================
-// AUTH MIDDLEWARE
-// ============================================================
-
-function authenticate(req, res, next) {
-
-    const supplied =
-        req.get("authorization") || "";
-
-    const expected =
-        `Bearer ${BRIDGE_SECRET}`;
-
-    const suppliedBuffer =
-        Buffer.from(supplied);
-
-    const expectedBuffer =
-        Buffer.from(expected);
-
-    if (
-        suppliedBuffer.length !==
-        expectedBuffer.length
-    ) {
-
-        return res.status(401).json({
-            success: false,
-            error: "Unauthorized"
-        });
-    }
-
-    if (
-        !crypto.timingSafeEqual(
-            suppliedBuffer,
-            expectedBuffer
-        )
-    ) {
-
-        return res.status(401).json({
-            success: false,
-            error: "Unauthorized"
-        });
-    }
-
-    next();
 }
 
 
@@ -224,11 +222,15 @@ app.get(
     (req, res) => {
 
         res.json({
+
             success: true,
+
             service: "ztgp2",
-            telegram: client.connected
-                ? "connected"
-                : "disconnected"
+
+            telegram:
+                client.connected
+                    ? "connected"
+                    : "disconnected"
         });
     }
 );
@@ -241,10 +243,16 @@ app.get(
 function safeFilename(name) {
 
     let value =
-        String(name || "file");
+        String(
+            name || "file"
+        );
+
 
     value =
-        path.basename(value);
+        path.basename(
+            value
+        );
+
 
     value =
         value.replace(
@@ -252,9 +260,11 @@ function safeFilename(name) {
             "_"
         );
 
+
     if (!value) {
         value = "file";
     }
+
 
     return value.slice(
         0,
@@ -273,21 +283,28 @@ function formatSize(bytes) {
         return "Unknown";
     }
 
+
     if (bytes < 1024) {
+
         return `${bytes} B`;
     }
 
+
     if (bytes < 1024 ** 2) {
+
         return `${(
             bytes / 1024
         ).toFixed(1)} KB`;
     }
 
+
     if (bytes < 1024 ** 3) {
+
         return `${(
             bytes / 1024 ** 2
         ).toFixed(1)} MB`;
     }
+
 
     return `${(
         bytes / 1024 ** 3
@@ -309,6 +326,7 @@ async function downloadTelegramMessage(
         `[TG] Looking up message ${messageId}`
     );
 
+
     const messages =
         await client.getMessages(
             chatId,
@@ -316,6 +334,7 @@ async function downloadTelegramMessage(
                 ids: Number(messageId)
             }
         );
+
 
     if (
         !messages ||
@@ -328,8 +347,10 @@ async function downloadTelegramMessage(
         );
     }
 
+
     const message =
         messages[0];
+
 
     if (!message.media) {
 
@@ -338,20 +359,24 @@ async function downloadTelegramMessage(
         );
     }
 
+
     const originalName =
         requestedName ||
         message.file?.name ||
         "telegram_file";
+
 
     const filename =
         safeFilename(
             originalName
         );
 
+
     const uniqueName =
         `${Date.now()}_${
             crypto.randomUUID()
         }_${filename}`;
+
 
     const destination =
         path.join(
@@ -359,13 +384,16 @@ async function downloadTelegramMessage(
             uniqueName
         );
 
+
     console.log(
         `[TG] Downloading: ${filename}`
     );
 
+
     console.log(
         `[TG] Destination: ${destination}`
     );
+
 
     await client.downloadMedia(
         message,
@@ -374,10 +402,12 @@ async function downloadTelegramMessage(
         }
     );
 
+
     const stat =
         await fsp.stat(
             destination
         );
+
 
     console.log(
         `[TG] Download complete: ${
@@ -385,11 +415,20 @@ async function downloadTelegramMessage(
         }`
     );
 
+
     return {
-        path: destination,
-        filename,
-        size: stat.size,
-        message
+
+        path:
+            destination,
+
+        filename:
+            filename,
+
+        size:
+            stat.size,
+
+        message:
+            message
     };
 }
 
@@ -407,13 +446,16 @@ async function uploadToGofile(
         `[GOFILE] Uploading ${filename}`
     );
 
+
     const form =
         new FormData();
+
 
     const fileBuffer =
         await fsp.readFile(
             filePath
         );
+
 
     const blob =
         new Blob(
@@ -426,11 +468,13 @@ async function uploadToGofile(
             }
         );
 
+
     form.append(
         "file",
         blob,
         filename
     );
+
 
     const response =
         await fetch(
@@ -441,12 +485,15 @@ async function uploadToGofile(
             }
         );
 
+
     const text =
         await response.text();
+
 
     console.log(
         `[GOFILE] HTTP ${response.status}`
     );
+
 
     if (!response.ok) {
 
@@ -457,12 +504,16 @@ async function uploadToGofile(
         );
     }
 
+
     let result;
+
 
     try {
 
         result =
-            JSON.parse(text);
+            JSON.parse(
+                text
+            );
 
     } catch {
 
@@ -470,6 +521,7 @@ async function uploadToGofile(
             "Gofile returned invalid JSON"
         );
     }
+
 
     if (
         result.status !== "ok"
@@ -482,6 +534,7 @@ async function uploadToGofile(
         );
     }
 
+
     return result;
 }
 
@@ -489,14 +542,31 @@ async function uploadToGofile(
 // ============================================================
 // TRANSFER ENDPOINT
 // ============================================================
+//
+// POST /transfer
+//
+// No BRIDGE_SECRET.
+// No Authorization header.
+// No BOT_TOKEN.
+// No authentication middleware.
+//
+// The Python bot sends:
+//
+// {
+//     "chat_id": "...",
+//     "message_id": 123,
+//     "file_name": "example.apk"
+// }
+//
+// ============================================================
 
 app.post(
     "/transfer",
-    authenticate,
     async (req, res) => {
 
         let downloadedPath =
             null;
+
 
         try {
 
@@ -506,37 +576,49 @@ app.post(
                 file_name
             } = req.body || {};
 
+
+            // ------------------------------------------------
+            // VALIDATE REQUEST
+            // ------------------------------------------------
+
             if (
                 chat_id === undefined ||
                 message_id === undefined
             ) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     error:
                         "chat_id and message_id are required"
                 });
             }
 
+
             console.log(
                 "========================================"
             );
+
 
             console.log(
                 "[TRANSFER] New request"
             );
 
+
             console.log(
                 `[TRANSFER] chat_id=${chat_id}`
             );
+
 
             console.log(
                 `[TRANSFER] message_id=${message_id}`
             );
 
-            // --------------------------------------------
-            // TELEGRAM
-            // --------------------------------------------
+
+            // ------------------------------------------------
+            // TELEGRAM DOWNLOAD
+            // ------------------------------------------------
 
             const downloaded =
                 await downloadTelegramMessage(
@@ -545,12 +627,14 @@ app.post(
                     file_name
                 );
 
+
             downloadedPath =
                 downloaded.path;
 
-            // --------------------------------------------
-            // GOFILE
-            // --------------------------------------------
+
+            // ------------------------------------------------
+            // GOFILE UPLOAD
+            // ------------------------------------------------
 
             const gofile =
                 await uploadToGofile(
@@ -558,24 +642,31 @@ app.post(
                     downloaded.filename
                 );
 
+
             const data =
                 gofile.data || {};
+
 
             const downloadPage =
                 data.downloadPage ||
                 data.directLink ||
                 null;
 
+
             console.log(
                 "[TRANSFER] Success"
             );
+
 
             console.log(
                 `[TRANSFER] URL=${downloadPage}`
             );
 
+
             return res.json({
-                success: true,
+
+                success:
+                    true,
 
                 file_name:
                     downloaded.filename,
@@ -595,6 +686,7 @@ app.post(
                     data
             });
 
+
         } catch (error) {
 
             console.error(
@@ -602,15 +694,23 @@ app.post(
                 error
             );
 
+
             return res.status(500).json({
-                success: false,
+
+                success:
+                    false,
+
                 error:
                     String(
                         error?.message ||
                         error ||
                         "Transfer failed"
-                    ).slice(0, 1000)
+                    ).slice(
+                        0,
+                        1000
+                    )
             });
+
 
         } finally {
 
@@ -626,11 +726,13 @@ app.post(
                         downloadedPath
                     );
 
+
                     console.log(
                         `[CLEANUP] Deleted ${
                             downloadedPath
                         }`
                     );
+
 
                 } catch (error) {
 
@@ -640,6 +742,7 @@ app.post(
                     );
                 }
             }
+
 
             console.log(
                 "========================================"
@@ -657,6 +760,7 @@ async function start() {
 
     await connectTelegram();
 
+
     app.listen(
         PORT,
         "0.0.0.0",
@@ -666,17 +770,26 @@ async function start() {
                 "========================================"
             );
 
+
             console.log(
                 "🚀 ztgp2 is ONLINE"
             );
+
 
             console.log(
                 `🌐 Port: ${PORT}`
             );
 
+
             console.log(
                 "📡 MTProto: connected"
             );
+
+
+            console.log(
+                "🔓 Bridge authentication: DISABLED"
+            );
+
 
             console.log(
                 "========================================"
@@ -686,6 +799,10 @@ async function start() {
 }
 
 
+// ============================================================
+// START
+// ============================================================
+
 start().catch(
     (error) => {
 
@@ -693,6 +810,7 @@ start().catch(
             "❌ Fatal startup error:",
             error
         );
+
 
         process.exit(1);
     }
