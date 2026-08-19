@@ -15,11 +15,52 @@ import {
 // CONFIG
 // ============================================================
 
-const API_ID =
-    Number(process.env.API_ID || 0);
+// Accept either:
+// API_ID / API_HASH
+// OR
+// TELEGRAM_API_ID / TELEGRAM_API_HASH
+
+const API_ID = Number(
+    process.env.API_ID ||
+    process.env.TELEGRAM_API_ID ||
+    0
+);
 
 const API_HASH =
-    process.env.API_HASH || "";
+    process.env.API_HASH ||
+    process.env.TELEGRAM_API_HASH ||
+    "";
+
+
+// ============================================================
+// VALIDATE
+// ============================================================
+
+if (!API_ID) {
+
+    console.error(
+        "❌ Telegram API ID missing."
+    );
+
+    console.error(
+        "Set either API_ID or TELEGRAM_API_ID in .env"
+    );
+
+    process.exit(1);
+}
+
+if (!API_HASH) {
+
+    console.error(
+        "❌ Telegram API Hash missing."
+    );
+
+    console.error(
+        "Set either API_HASH or TELEGRAM_API_HASH in .env"
+    );
+
+    process.exit(1);
+}
 
 
 // ============================================================
