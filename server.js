@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import express from "express";
 import fsp from "node:fs/promises";
+import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -20,13 +21,6 @@ const PORT = Number(
 
 // ============================================================
 // TELEGRAM API CREDENTIALS
-//
-// Supports BOTH naming styles:
-//
-// TELEGRAM_API_ID / TELEGRAM_API_HASH
-// API_ID / API_HASH
-//
-// TELEGRAM_* takes priority.
 // ============================================================
 
 const API_ID = Number(
@@ -40,13 +34,9 @@ const API_HASH =
     process.env.API_HASH ||
     "";
 
-
-// ============================================================
-// TELEGRAM SESSION
-// ============================================================
-
 const TELEGRAM_SESSION =
-    process.env.TELEGRAM_SESSION || "";
+    process.env.TELEGRAM_SESSION ||
+    "";
 
 
 // ============================================================
@@ -69,11 +59,25 @@ const TEMP_DIR =
 
 
 // ============================================================
+// TIMEOUTS
+// ============================================================
+
+const TRANSFER_TIMEOUT_MS = Number(
+    process.env.TRANSFER_TIMEOUT_MS ||
+    90 * 60 * 1000
+);
+
+const GOFILE_TIMEOUT_MS = Number(
+    process.env.GOFILE_TIMEOUT_MS ||
+    90 * 60 * 1000
+);
+
+
+// ============================================================
 // VALIDATION
 // ============================================================
 
 if (!API_ID) {
-
     console.error(
         "❌ Telegram API ID is missing."
     );
@@ -87,7 +91,6 @@ if (!API_ID) {
 
 
 if (!API_HASH) {
-
     console.error(
         "❌ Telegram API HASH is missing."
     );
@@ -101,7 +104,6 @@ if (!API_HASH) {
 
 
 if (!TELEGRAM_SESSION) {
-
     console.error(
         "❌ TELEGRAM_SESSION is missing."
     );
@@ -148,7 +150,6 @@ const session =
         TELEGRAM_SESSION
     );
 
-
 const client =
     new TelegramClient(
         session,
@@ -170,22 +171,14 @@ async function connectTelegram() {
         "[TG] Connecting through MTProto..."
     );
 
-    /*
-     * The saved session means the server does not
-     * normally need an interactive login.
-     */
-
     await client.connect();
-
 
     const me =
         await client.getMe();
 
-
     console.log(
         "[TG] Connected."
     );
-
 
     console.log(
         `[TG] Account: ${
@@ -213,20 +206,13 @@ app.get(
 );
 
 
-// ============================================================
-// TELEGRAM STATUS
-// ============================================================
-
 app.get(
     "/health",
     (req, res) => {
 
         res.json({
-
             success: true,
-
             service: "ztgp2",
-
             telegram:
                 client.connected
                     ? "connected"
@@ -247,12 +233,10 @@ function safeFilename(name) {
             name || "file"
         );
 
-
     value =
         path.basename(
             value
         );
-
 
     value =
         value.replace(
@@ -260,11 +244,9 @@ function safeFilename(name) {
             "_"
         );
 
-
     if (!value) {
         value = "file";
     }
-
 
     return value.slice(
         0,
@@ -279,36 +261,95 @@ function safeFilename(name) {
 
 function formatSize(bytes) {
 
-    if (!bytes) {
+    if (
+        bytes === undefined ||
+        bytes === null ||
+        Number.isNaN(Number(bytes))
+    ) {
         return "Unknown";
     }
 
+    bytes = Number(bytes);
 
     if (bytes < 1024) {
-
         return `${bytes} B`;
     }
 
-
     if (bytes < 1024 ** 2) {
-
         return `${(
             bytes / 1024
         ).toFixed(1)} KB`;
     }
 
-
     if (bytes < 1024 ** 3) {
-
         return `${(
             bytes / 1024 ** 2
         ).toFixed(1)} MB`;
     }
 
-
     return `${(
         bytes / 1024 ** 3
     ).toFixed(2)} GB`;
+}
+
+
+// ============================================================
+// NORMALIZE TELEGRAM MESSAGE ID
+// ============================================================
+
+function normalizeMessageId(value) {
+
+    const id =
+        Number(value);
+
+    if (
+        !Number.isSafeInteger(id) ||
+        id <= 0
+    ) {
+        throw new Error(
+            "Invalid Telegram message_id"
+        );
+    }
+
+    return id;
+}
+
+
+// ============================================================
+// NORMALIZE TELEGRAM CHAT ID
+// ============================================================
+
+function normalizeChatId(value) {
+
+    if (
+        value === undefined ||
+        value === null ||
+        String(value).trim() === ""
+    ) {
+        throw new Error(
+            "Invalid Telegram chat_id"
+        );
+    }
+
+    const text =
+        String(value).trim();
+
+    if (
+        /^-?\d+$/.test(text)
+    ) {
+        const numeric =
+            Number(text);
+
+        if (
+            Number.isSafeInteger(
+                numeric
+            )
+        ) {
+            return numeric;
+        }
+    }
+
+    return text;
 }
 
 
@@ -322,18 +363,47 @@ async function downloadTelegramMessage(
     requestedName
 ) {
 
+    const normalizedChatId =
+        normalizeChatId(
+            chatId
+        );
+
+    const normalizedMessageId =
+        normalizeMessageId(
+            messageId
+        );
+
     console.log(
-        `[TG] Looking up message ${messageId}`
+        `[TG] Looking up message ${normalizedMessageId}`
     );
 
+    let messages;
 
-    const messages =
-        await client.getMessages(
-            chatId,
-            {
-                ids: Number(messageId)
-            }
+    try {
+
+        messages =
+            await client.getMessages(
+                normalizedChatId,
+                {
+                    ids: normalizedMessageId
+                }
+            );
+
+    } catch (error) {
+
+        console.error(
+            "[TG] getMessages failed:",
+            error?.message ||
+            error
         );
+
+        throw new Error(
+            `Telegram message lookup failed: ${
+                error?.message ||
+                error
+            }`
+        );
+    }
 
 
     if (
@@ -389,24 +459,75 @@ async function downloadTelegramMessage(
         `[TG] Downloading: ${filename}`
     );
 
-
     console.log(
         `[TG] Destination: ${destination}`
     );
 
 
-    await client.downloadMedia(
-        message,
-        {
-            outputFile: destination
-        }
-    );
+    try {
 
-
-    const stat =
-        await fsp.stat(
-            destination
+        await client.downloadMedia(
+            message,
+            {
+                outputFile: destination
+            }
         );
+
+    } catch (error) {
+
+        try {
+
+            await fsp.unlink(
+                destination
+            );
+
+        } catch {
+            // File may not exist.
+        }
+
+        throw new Error(
+            `Telegram download failed: ${
+                error?.message ||
+                error
+            }`
+        );
+    }
+
+
+    let stat;
+
+    try {
+
+        stat =
+            await fsp.stat(
+                destination
+            );
+
+    } catch (error) {
+
+        throw new Error(
+            `Downloaded file could not be verified: ${
+                error?.message ||
+                error
+            }`
+        );
+    }
+
+
+    if (!stat.isFile()) {
+
+        throw new Error(
+            "Telegram download did not produce a regular file"
+        );
+    }
+
+
+    if (stat.size <= 0) {
+
+        throw new Error(
+            "Telegram download produced an empty file"
+        );
+    }
 
 
     console.log(
@@ -417,7 +538,6 @@ async function downloadTelegramMessage(
 
 
     return {
-
         path:
             destination,
 
@@ -434,7 +554,35 @@ async function downloadTelegramMessage(
 
 
 // ============================================================
-// GOFILE UPLOAD
+// MULTIPART HELPERS
+// ============================================================
+
+function multipartEscape(value) {
+
+    return String(
+        value || ""
+    )
+        .replace(
+            /\\/g,
+            "\\\\"
+        )
+        .replace(
+            /"/g,
+            '\\"'
+        )
+        .replace(
+            /\r/g,
+            ""
+        )
+        .replace(
+            /\n/g,
+            ""
+        );
+}
+
+
+// ============================================================
+// STREAMING GOFILE UPLOAD
 // ============================================================
 
 async function uploadToGofile(
@@ -447,117 +595,213 @@ async function uploadToGofile(
     );
 
 
-    const form =
-        new FormData();
-
-
-    const fileBuffer =
-        await fsp.readFile(
+    const stat =
+        await fsp.stat(
             filePath
         );
 
 
-    const blob =
-        new Blob(
-            [
-                fileBuffer
-            ],
-            {
-                type:
-                    "application/octet-stream"
-            }
+    const boundary =
+        `----ZTGP2Boundary${
+            crypto.randomBytes(24).toString("hex")
+        }`;
+
+
+    const safeUploadName =
+        multipartEscape(
+            filename
         );
 
 
-    form.append(
-        "file",
-        blob,
-        filename
-    );
-
-
-    const response =
-        await fetch(
-            GOFILE_UPLOAD_URL,
-            {
-                method: "POST",
-                body: form
-            }
+    const fieldHeader =
+        Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="file"; ` +
+            `filename="${safeUploadName}"\r\n` +
+            `Content-Type: application/octet-stream\r\n` +
+            `\r\n`
         );
 
 
-    const text =
-        await response.text();
+    const fieldFooter =
+        Buffer.from(
+            `\r\n--${boundary}--\r\n`
+        );
+
+
+    const contentLength =
+        fieldHeader.length +
+        stat.size +
+        fieldFooter.length;
 
 
     console.log(
-        `[GOFILE] HTTP ${response.status}`
+        `[GOFILE] File size: ${
+            formatSize(stat.size)
+        }`
+    );
+
+    console.log(
+        `[GOFILE] Streaming multipart upload...`
     );
 
 
-    if (!response.ok) {
+    const controller =
+        new AbortController();
 
-        throw new Error(
-            `Gofile HTTP ${response.status}: ${
-                text.slice(0, 500)
-            }`
+
+    const timeout =
+        setTimeout(
+            () => {
+                controller.abort();
+            },
+            GOFILE_TIMEOUT_MS
         );
+
+
+    const fileStream =
+        fs.createReadStream(
+            filePath
+        );
+
+
+    async function* body() {
+
+        yield fieldHeader;
+
+        try {
+
+            for await (
+                const chunk
+                of fileStream
+            ) {
+
+                yield chunk;
+            }
+
+        } finally {
+
+            fileStream.destroy();
+        }
+
+        yield fieldFooter;
     }
-
-
-    let result;
 
 
     try {
 
-        result =
-            JSON.parse(
-                text
+        const response =
+            await fetch(
+                GOFILE_UPLOAD_URL,
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            `multipart/form-data; boundary=${boundary}`,
+
+                        "Content-Length":
+                            String(contentLength)
+                    },
+
+                    body:
+                        body(),
+
+                    duplex:
+                        "half",
+
+                    signal:
+                        controller.signal
+                }
             );
 
-    } catch {
 
-        throw new Error(
-            "Gofile returned invalid JSON"
+        const text =
+            await response.text();
+
+
+        console.log(
+            `[GOFILE] HTTP ${response.status}`
         );
-    }
 
 
-    if (
-        result.status !== "ok"
-    ) {
-
-        throw new Error(
-            result.message ||
-            result.error ||
-            "Gofile upload failed"
+        console.log(
+            `[GOFILE] Response preview: ${
+                text.slice(0, 1000)
+            }`
         );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Gofile HTTP ${
+                    response.status
+                }: ${
+                    text.slice(0, 500)
+                }`
+            );
+        }
+
+
+        let result;
+
+        try {
+
+            result =
+                JSON.parse(
+                    text
+                );
+
+        } catch {
+
+            throw new Error(
+                "Gofile returned invalid JSON"
+            );
+        }
+
+
+        if (
+            result.status !== "ok"
+        ) {
+
+            throw new Error(
+                result.message ||
+                result.error ||
+                "Gofile upload failed"
+            );
+        }
+
+
+        return result;
+
+    } catch (error) {
+
+        if (
+            error?.name ===
+            "AbortError"
+        ) {
+
+            throw new Error(
+                "Gofile upload timed out"
+            );
+        }
+
+        throw error;
+
+    } finally {
+
+        clearTimeout(
+            timeout
+        );
+
+        fileStream.destroy();
     }
-
-
-    return result;
 }
 
 
 // ============================================================
 // TRANSFER ENDPOINT
-// ============================================================
-//
-// POST /transfer
-//
-// No BRIDGE_SECRET.
-// No Authorization header.
-// No BOT_TOKEN.
-// No authentication middleware.
-//
-// The Python bot sends:
-//
-// {
-//     "chat_id": "...",
-//     "message_id": 123,
-//     "file_name": "example.apk"
-// }
-//
 // ============================================================
 
 app.post(
@@ -566,6 +810,16 @@ app.post(
 
         let downloadedPath =
             null;
+
+
+        res.setHeader(
+            "Content-Type",
+            "application/json; charset=utf-8"
+        );
+
+
+        const transferStarted =
+            Date.now();
 
 
         try {
@@ -588,7 +842,8 @@ app.post(
 
                 return res.status(400).json({
 
-                    success: false,
+                    success:
+                        false,
 
                     error:
                         "chat_id and message_id are required"
@@ -596,23 +851,31 @@ app.post(
             }
 
 
+            const normalizedChatId =
+                normalizeChatId(
+                    chat_id
+                );
+
+            const normalizedMessageId =
+                normalizeMessageId(
+                    message_id
+                );
+
+
             console.log(
                 "========================================"
             );
-
 
             console.log(
                 "[TRANSFER] New request"
             );
 
-
             console.log(
-                `[TRANSFER] chat_id=${chat_id}`
+                `[TRANSFER] chat_id=${normalizedChatId}`
             );
 
-
             console.log(
-                `[TRANSFER] message_id=${message_id}`
+                `[TRANSFER] message_id=${normalizedMessageId}`
             );
 
 
@@ -622,8 +885,8 @@ app.post(
 
             const downloaded =
                 await downloadTelegramMessage(
-                    chat_id,
-                    message_id,
+                    normalizedChatId,
+                    normalizedMessageId,
                     file_name
                 );
 
@@ -644,26 +907,40 @@ app.post(
 
 
             const data =
-                gofile.data || {};
+                gofile?.data || {};
 
 
             const downloadPage =
                 data.downloadPage ||
                 data.directLink ||
+                data.download_page ||
                 null;
+
+
+            if (!downloadPage) {
+
+                throw new Error(
+                    "Gofile upload succeeded but no download URL was returned"
+                );
+            }
 
 
             console.log(
                 "[TRANSFER] Success"
             );
 
-
             console.log(
                 `[TRANSFER] URL=${downloadPage}`
             );
 
+            console.log(
+                `[TRANSFER] Total time=${
+                    ((Date.now() - transferStarted) / 1000).toFixed(1)
+                }s`
+            );
 
-            return res.json({
+
+            return res.status(200).json({
 
                 success:
                     true,
@@ -689,30 +966,56 @@ app.post(
 
         } catch (error) {
 
+            const message =
+                String(
+                    error?.message ||
+                    error ||
+                    "Transfer failed"
+                ).slice(
+                    0,
+                    1000
+                );
+
+
             console.error(
                 "[TRANSFER] Failed:",
                 error
             );
 
 
-            return res.status(500).json({
-
-                success:
-                    false,
-
-                error:
-                    String(
-                        error?.message ||
-                        error ||
-                        "Transfer failed"
-                    ).slice(
-                        0,
-                        1000
-                    )
-            });
+            console.error(
+                `[TRANSFER] Total time=${
+                    ((Date.now() - transferStarted) / 1000).toFixed(1)
+                }s`
+            );
 
 
-        } finally {
+            if (
+                !res.headersSent
+            ) {
+
+                return res.status(500).json({
+
+                    success:
+                        false,
+
+                    error:
+                        message
+                });
+            }
+
+
+            try {
+
+                res.end();
+
+            } catch {
+                // Ignore response cleanup failure.
+            }
+        }
+
+
+        finally {
 
             // --------------------------------------------
             // DELETE TEMPORARY FILE
@@ -726,20 +1029,25 @@ app.post(
                         downloadedPath
                     );
 
-
                     console.log(
                         `[CLEANUP] Deleted ${
                             downloadedPath
                         }`
                     );
 
-
                 } catch (error) {
 
-                    console.error(
-                        "[CLEANUP] Failed:",
-                        error.message
-                    );
+                    if (
+                        error?.code !==
+                        "ENOENT"
+                    ) {
+
+                        console.error(
+                            "[CLEANUP] Failed:",
+                            error?.message ||
+                            error
+                        );
+                    }
                 }
             }
 
@@ -770,26 +1078,29 @@ async function start() {
                 "========================================"
             );
 
-
             console.log(
                 "🚀 ztgp2 is ONLINE"
             );
-
 
             console.log(
                 `🌐 Port: ${PORT}`
             );
 
-
             console.log(
                 "📡 MTProto: connected"
             );
 
+            console.log(
+                "☁️ Gofile: streaming upload enabled"
+            );
+
+            console.log(
+                "📦 Transfer size limit: NONE"
+            );
 
             console.log(
                 "🔓 Bridge authentication: DISABLED"
             );
-
 
             console.log(
                 "========================================"
@@ -811,8 +1122,8 @@ start().catch(
             error
         );
 
-
         process.exit(1);
     }
 );
+
 
